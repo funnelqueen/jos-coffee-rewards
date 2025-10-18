@@ -1,24 +1,52 @@
 export default async function handler(req, res) {
-  // allow browser requests
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     return res.status(200).end();
   }
 
-  const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL; // your /exec link
-  const API_KEY = process.env.REWARDS_API_KEY;         // same key as in Apps Script
+  // Simple GET ping so you can test in a browser
+  if (req.method === 'GET') {
+    return res.status(200).json({ ok: true, ping: 'rewards-proxy' });
+  }
+
+  // Ensure env vars exist
+  const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
+  const API_KEY = process.env.REWARDS_API_KEY;
+  if (!APPS_SCRIPT_URL || !API_KEY) {
+    return res.status(500).json({
+      ok: false,
+      error: 'Missing env vars: APPS_SCRIPT_URL and/or REWARDS_API_KEY',
+    });
+  }
 
   try {
+    // Parse body safely (Vercel usually parses JSON; if not, handle string)
+    let payload = req.body || {};
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload || '{}'); } catch { payload = {}; }
+    }
+
+    // Forward to Apps Script as JSON
     const r = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ api_key: API_KEY, ...req.body })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: API_KEY, ...payload }),
     });
-    const data = await r.json();
-    res.status(200).json(data);
+
+    // Try to parse JSON; if it fails, return text with status for debugging
+    let data;
+    const raw = await r.text();
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { ok: false, error: 'apps_script_non_json', status: r.status, body: raw?.slice?.(0, 500) };
+    }
+
+    return res.status(200).json(data);
   } catch (e) {
-    res.status(500).json({ ok:false, error:String(e) });
+    return res.status(500).json({ ok: false, error: String(e) });
   }
 }
