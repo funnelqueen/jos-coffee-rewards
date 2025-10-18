@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Jo’s Coffee Rewards</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 24px; }
+  .card { max-width: 420px; margin: 0 auto; padding: 20px; border-radius: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+  h1 { margin: 0 0 6px; }
+  .sub { color: #666; margin-bottom: 16px; }
+  input, button { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #ddd; font-size: 16px; }
+  button { border: 0; background: #7a5230; color: #fff; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: grid; gap: 10px; margin: 12px 0; }
+  .progress { height: 14px; background: #eee; border-radius: 999px; overflow: hidden; }
+  .bar { height: 100%; width: 0%; background: #c08a5a; transition: width .4s ease; }
+  .muted { color: #777; font-size: 14px; }
+  .ok { color: #0a7a41; }
+  .err { color: #b00020; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Jo’s Coffee Rewards</h1>
+    <div class="sub">Earn a free drink every <span id="rewardSize">5</span> beans.</div>
+
+    <div class="row">
+      <input id="name" placeholder="Your name (optional)" />
+      <input id="phone" placeholder="Your phone (required)" />
+      <button id="btnFetch">See my beans</button>
+    </div>
+
+    <div id="profile" style="display:none">
+      <div class="row">
+        <div class="progress"><div id="bar" class="bar"></div></div>
+        <div class="muted">Beans: <b id="points">0</b> / <b id="goal">5</b></div>
+      </div>
+
+      <div class="row">
+        <button id="btnCheckin">Check-in (+1 bean)</button>
+        <div id="msg" class="muted"></div>
+      </div>
+    </div>
+
+    <div class="muted" style="margin-top:16px">
+      Tip: Add this page to your home screen for quick access.
+    </div>
+  </div>
+
+<script>
+const API_URL = "https://script.google.com/macros/s/AKfycbxI7lViKJdwWjnGgv9mi-uayEgXyBF3cA_viVDHLPIzfE5SVHl1Vw2wNiJPp7sb1nTFIQ/exec"; // <- paste your Apps Script Web App URL here
+const API_KEY = "joscoffee_2n48f73r9K394ndskf82n";          // <- same string as in Apps Script
+
+const $ = sel => document.querySelector(sel);
+const btnFetch = $('#btnFetch');
+const btnCheck = $('#btnCheckin');
+const nameEl = $('#name');
+const phoneEl = $('#phone');
+const profile = $('#profile');
+const pointsEl = $('#points');
+const goalEl = $('#goal');
+const rewardSizeEl = $('#rewardSize');
+const bar = $('#bar');
+const msg = $('#msg');
+
+function saveLocal(name, phone){
+  localStorage.setItem('rewards_name', name || '');
+  localStorage.setItem('rewards_phone', phone || '');
+}
+function loadLocal(){
+  nameEl.value = localStorage.getItem('rewards_name') || '';
+  phoneEl.value = localStorage.getItem('rewards_phone') || '';
+}
+function setBar(points, goal){
+  pointsEl.textContent = points;
+  goalEl.textContent = goal;
+  rewardSizeEl.textContent = goal;
+  const pct = Math.min(100, Math.round((points % goal) / goal * 100));
+  bar.style.width = pct + '%';
+}
+
+async function api(action, body){
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body: JSON.stringify({ api_key: API_KEY, action, ...body })
+  });
+  return res.json();
+}
+
+async function getProfile(){
+  const phone = phoneEl.value.trim();
+  const name  = nameEl.value.trim();
+  if (!phone){ msg.textContent = 'Phone is required.'; msg.className='muted err'; return; }
+  btnFetch.disabled = true;
+  saveLocal(name, phone);
+  const data = await api('get_profile', { phone });
+  btnFetch.disabled = false;
+  if (!data.ok){ msg.textContent = data.error || 'Error'; msg.className='muted err'; return; }
+  profile.style.display = '';
+  setBar(data.points, data.reward_size || 5);
+  msg.textContent = data.last_checkin_at ? `Last check-in: ${new Date(data.last_checkin_at).toLocaleString()}` : 'Welcome!';
+  msg.className = 'muted';
+}
+
+async function doCheckin(){
+  const phone = phoneEl.value.trim();
+  const name  = nameEl.value.trim();
+  if (!phone){ msg.textContent = 'Phone is required.'; msg.className='muted err'; return; }
+  btnCheck.disabled = true;
+  const data = await api('checkin', { phone, name });
+  btnCheck.disabled = false;
+  if (!data.ok){
+    if (data.error === 'cooldown'){
+      msg.textContent = data.message || 'You can check in later.';
+      msg.className = 'muted err';
+    } else {
+      msg.textContent = data.error || 'Error';
+      msg.className = 'muted err';
+    }
+    return;
+  }
+  setBar(data.points, data.reward_size || 5);
+  msg.textContent = data.earned_reward ? '🎉 Free drink unlocked! Show this to the barista.' : 'Bean added!';
+  msg.className = 'muted ok';
+}
+
+btnFetch.addEventListener('click', getProfile);
+$('#btnCheckin').addEventListener('click', doCheckin);
+loadLocal();
+</script>
+</body>
+</html>
